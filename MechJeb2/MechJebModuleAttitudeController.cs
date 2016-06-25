@@ -49,6 +49,11 @@ namespace MuMech
         [Persistent(pass = (int)Pass.Global)]
         public double kdFactor = 0.5;
 
+		[Persistent(pass = (int)Pass.Global)]
+		public double deadband = 0.0001;
+
+		[Persistent(pass = (int)Pass.Global)]
+		public double kWlimit = 0.15;
         [Persistent(pass = (int)Pass.Global)]
         [ValueInfoItem("Steering error", InfoItem.Category.Vessel, format = "F1", units = "º")]
         public MovingAverage steeringError = new MovingAverage();
@@ -204,7 +209,7 @@ namespace MuMech
 
         public void setPIDParameters()
         {
-            Vector3d invTf = TfV.Invert();
+            Vector3d invTf = TfV.InvertNoNaN();
             pid.Kd = kdFactor * invTf;
 
             pid.Kp = (1 / (kpFactor * Math.Sqrt(2))) * pid.Kd;
@@ -367,6 +372,22 @@ namespace MuMech
         public override void OnFixedUpdate()
         {
             steeringError.value = attitudeError = attitudeAngleFromTarget();
+
+            if (useSAS)
+                return;
+
+            torque = vesselState.torqueAvailable;
+            // TODO : bring DifferentialThrottle back
+            //if (core.thrust.differentialThrottleSuccess)
+            //    torque += vesselState.torqueFromDiffThrottle * vessel.ctrlState.mainThrottle / 2.0;
+
+            inertia = Vector3d.Scale(
+                vesselState.angularMomentum.Sign(),
+                Vector3d.Scale(
+                    Vector3d.Scale(vesselState.angularMomentum, vesselState.angularMomentum),
+                    Vector3d.Scale(torque, vesselState.MoI).InvertNoNaN()
+                    )
+                );
         }
 
         public override void OnUpdate()
@@ -405,7 +426,8 @@ namespace MuMech
                     part.vessel.Autopilot.SAS.LockHeading(_requestedAttitude, true);
                 }
 
-                core.thrust.differentialThrottleDemandedTorque = Vector3d.zero;
+                // TODO : bring DifferentialThrottle back
+                //core.thrust.differentialThrottleDemandedTorque = Vector3d.zero;
             }
             else
             {
@@ -415,21 +437,9 @@ namespace MuMech
                 Quaternion delta = Quaternion.Inverse(Quaternion.Euler(90, 0, 0) * Quaternion.Inverse(vesselTransform.rotation) * _requestedAttitude);
 
                 Vector3d deltaEuler = delta.DeltaEuler();
-
-                torque = vesselState.torqueAvailable + vesselState.torqueFromEngine * vessel.ctrlState.mainThrottle;
-                if (core.thrust.differentialThrottleSuccess)
-                    torque += vesselState.torqueFromDiffThrottle * vessel.ctrlState.mainThrottle / 2.0;
-
-                inertia = Vector3d.Scale(
-                    vesselState.angularMomentum.Sign(),
-                    Vector3d.Scale(
-                        Vector3d.Scale(vesselState.angularMomentum, vesselState.angularMomentum),
-                        Vector3d.Scale(torque, vesselState.MoI).Invert()
-                        )
-                    );
-
+                
                 // ( MoI / available torque ) factor:
-                Vector3d NormFactor = Vector3d.Scale(vesselState.MoI, torque.Invert()).Reorder(132);
+                Vector3d NormFactor = Vector3d.Scale(vesselState.MoI, torque.InvertNoNaN()).Reorder(132);
 
                 // Find out the real shorter way to turn were we wan to.
                 // Thanks to HoneyFox
@@ -473,7 +483,17 @@ namespace MuMech
                     tuneTf(torque);
                 setPIDParameters();
 
-                pidAction = pid.Compute(err, omega);
+                // angular velocity limit:
+				var Wlimit = new Vector3d( Math.Sqrt(NormFactor.x * Math.PI * kWlimit),
+										   Math.Sqrt(NormFactor.y * Math.PI * kWlimit),
+										   Math.Sqrt(NormFactor.z * Math.PI * kWlimit));
+
+                pidAction = pid.Compute(err, omega, Wlimit);
+
+				// deadband
+				pidAction.x = Math.Abs(pidAction.x) >= deadband ? pidAction.x : 0.0;
+				pidAction.y = Math.Abs(pidAction.y) >= deadband ? pidAction.y : 0.0;
+				pidAction.z = Math.Abs(pidAction.z) >= deadband ? pidAction.z : 0.0;
 
                 // low pass filter,  wf = 1/Tf:
                 Vector3d act = lastAct;
@@ -487,8 +507,9 @@ namespace MuMech
                 act = new Vector3d(s.pitch, s.yaw, s.roll);
 
                 // Feed the control torque to the differential throttle
-                if (core.thrust.differentialThrottleSuccess)
-                    core.thrust.differentialThrottleDemandedTorque = -Vector3d.Scale(act.xzy, vesselState.torqueFromDiffThrottle * vessel.ctrlState.mainThrottle);
+                // TODO : bring DifferentialThrottle back
+                //if (core.thrust.differentialThrottleSuccess)
+                //    core.thrust.differentialThrottleDemandedTorque = -Vector3d.Scale(act.xzy, vesselState.torqueFromDiffThrottle * vessel.ctrlState.mainThrottle);
             }
         }
 

@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using UnityEngine;
 
 namespace MuMech
@@ -183,7 +180,7 @@ namespace MuMech
 
         public override void OnStart(PartModule.StartState state)
         {
-            RenderingManager.AddToPostDrawQueue(1, DoMapView);
+            core.AddToPostDrawQueue(DoMapView);
 
             users.Add(this); //TargetController should always be running
         }
@@ -225,8 +222,8 @@ namespace MuMech
 
         public override void OnUpdate()
         {
-            if (pickingPositionTarget && !GuiUtils.MouseIsOverWindow(core) && GuiUtils.GetMouseCoordinates(mainBody) != null) Screen.showCursor = false;
-            else Screen.showCursor = true;
+            if (pickingPositionTarget && !GuiUtils.MouseIsOverWindow(core) && GuiUtils.GetMouseCoordinates(mainBody) != null) Cursor.visible = false;
+            else Cursor.visible = true;
         }
 
         void DoMapView()
@@ -250,7 +247,7 @@ namespace MuMech
 
                     if (mouseCoords != null)
                     {
-                        GLUtils.DrawMapViewGroundMarker(mainBody, mouseCoords.latitude, mouseCoords.longitude, new Color(1.0f, 0.56f, 0.0f));
+                        GLUtils.DrawGroundMarker(mainBody, mouseCoords.latitude, mouseCoords.longitude, new Color(1.0f, 0.56f, 0.0f), true, 60);
                         GUI.Label(new Rect(Input.mousePosition.x + 15, Screen.height - Input.mousePosition.y, 200, 50), mouseCoords.ToStringDecimal() + "\n" + ScienceUtil.GetExperimentBiome(mainBody, mouseCoords.latitude, mouseCoords.longitude));
 
                         if (Input.GetMouseButtonDown(0))
@@ -274,61 +271,7 @@ namespace MuMech
             if ((target is Vessel) && (!((Vessel)target).LandedOrSplashed || (((Vessel)target).mainBody != vessel.mainBody))) return;
             if (target is DirectionTarget) return;
 
-            GLUtils.DrawMapViewGroundMarker(targetBody, targetLatitude, targetLongitude, Color.red);
-        }
-    }
-
-    public class PositionTarget : ITargetable
-    {
-        GameObject g = new GameObject();
-        string name;
-        Vector3d position;
-
-        public PositionTarget(string name)
-        {
-            this.name = name;
-        }
-
-        public void Update(CelestialBody body, double latitude, double longitude)
-        {
-            double altitude = body.TerrainAltitude(latitude, longitude);
-            Update(body, latitude, longitude, altitude);
-        }
-
-        public void Update(CelestialBody body, double latitude, double longitude, double altitude)
-        {
-            Update(body.GetWorldSurfacePosition(latitude, longitude, altitude));
-        }
-
-        //Call this every frame to make sure the target transform stays up to date
-        public void Update(Vector3d position)
-        {
-            this.position = position;
-            g.transform.position = position;
-        }
-
-        public Vector3 GetFwdVector() { return Vector3d.up; }
-        public string GetName() { return name; }
-        public Vector3 GetObtVelocity() { return Vector3.zero; }
-        public Orbit GetOrbit() { return null; }
-        public OrbitDriver GetOrbitDriver() { return null; }
-        public Vector3 GetSrfVelocity() { return Vector3.zero; }
-        public Transform GetTransform() { return g.transform; }
-        public Vessel GetVessel() { return null; }
-        public VesselTargetModes GetTargetingMode() { return VesselTargetModes.Direction ; }
-    }
-
-    public class DirectionTarget : PositionTarget
-    {
-        Vector3d direction;
-
-        public DirectionTarget(string name) : base(name) { }
-
-        //Call this every frame to make sure the target transform stays up to date
-        public new void Update(Vector3d direction)
-        {
-            this.direction = direction;
-            base.Update(FlightGlobals.ActiveVessel.transform.position + 10000 * direction);
+            GLUtils.DrawGroundMarker(targetBody, targetLatitude, targetLongitude, Color.red, true);
         }
     }
 }

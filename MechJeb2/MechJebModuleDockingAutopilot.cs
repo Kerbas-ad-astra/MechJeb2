@@ -1,7 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using UnityEngine;
 
 namespace MuMech
@@ -67,7 +64,7 @@ namespace MuMech
         {
             if (state != PartModule.StartState.None && state != PartModule.StartState.Editor)
             {
-                RenderingManager.AddToPostDrawQueue(1, DrawBoundingBox);
+                core.AddToPostDrawQueue(DrawBoundingBox);
 
                 // Turn off docking AP on successful docking (in case other checks for successful docking fail)
                 GameEvents.onPartCouple.Add((GameEvents.FromToAction<Part, Part> ev) =>
@@ -100,10 +97,11 @@ namespace MuMech
 
         private double FixSpeed(double s)
         {
+            // It's ok if it's a little off?
             if (speedLimit != 0)
             {
-                if (s >  speedLimit) s =  speedLimit;
-                if (s < -speedLimit) s = -speedLimit;
+                if (s >  speedLimit) s =  speedLimit * 1.005;
+                if (s < -speedLimit) s = -speedLimit * 1.005;
             }
             return s;
         }
@@ -132,9 +130,12 @@ namespace MuMech
             Vector3d targetVel = core.target.TargetOrbit.GetVel();
 
             double zApproachSpeed = MaxSpeedForDistance(Math.Max(zSep - acquireRange, 0), -zAxis);
-			double latApproachSpeed = MaxSpeedForDistance(lateralSep.magnitude > 1.0 ? Math.Pow(lateralSep.magnitude, 1.05) : lateralSep.magnitude, -lateralSep); // TODO check if it should be +lateralSep
+			double latApproachSpeed = MaxSpeedForDistance(lateralSep.magnitude, -lateralSep); // TODO check if it should be +lateralSep
 
             bool align = true;
+
+            double timeToAxis;
+            double timeToTargetSize;
 
             switch (dockingStep)
             {
@@ -165,24 +166,31 @@ namespace MuMech
                     break;
 
                 case DockingStep.MOVING_TO_START:
-                    if (zSep < targetSize)
-                        zApproachSpeed = 0;
-                    else
-                    {
-
-                        double timeToAxis = Math.Abs(lateralSep.magnitude / latApproachSpeed );
-                        double timeToTargetSize = Math.Abs((zSep - targetSize) / zApproachSpeed);                                               
+                    
+                        timeToAxis = Math.Abs(lateralSep.magnitude / latApproachSpeed );
+                        timeToTargetSize = Math.Abs((zSep - targetSize) / zApproachSpeed);                                               
 
                         if (timeToTargetSize < timeToAxis && timeToAxis > 0 && timeToTargetSize > 0)
                         {
                             zApproachSpeed *= Math.Min(timeToTargetSize / timeToAxis, 1);
                         }
-                    }
+                    if (zSep < targetSize)
+                        //zApproachSpeed = 0;
+                        zApproachSpeed *= -1;
+                    
+                    
                     status = "Moving toward the starting point at " + zApproachSpeed.ToString("F2") + " m/s.";
                     break;
 
                 case DockingStep.DOCKING:
                     status = "Moving forward to dock at " + zApproachSpeed.ToString("F2") + " m/s.";
+                    timeToAxis = Math.Abs(lateralSep.magnitude / latApproachSpeed );
+                    timeToTargetSize = Math.Abs((zSep) / zApproachSpeed);                                               
+                    
+                    if (timeToTargetSize < timeToAxis && timeToAxis > 0 && timeToTargetSize > 0)
+                    {
+                        zApproachSpeed *= Math.Min(timeToTargetSize / (timeToAxis * 2.0), 1);
+                    }
                     break;
 
                 default:
@@ -250,6 +258,18 @@ namespace MuMech
                     {
                         EndDocking();
                     }
+				// Added checks to make sure we're still good to dock.
+					else if (lateralSep.magnitude > dockingcorridorRadius) // far from docking axis
+					{
+						if (zSep < 0)  //we're behind the target
+							dockingStep = DockingStep.WRONG_SIDE_BACKING_UP;
+						else if (lateralSep.magnitude > dockingcorridorRadius) // in front but far from docking axis
+                        {
+							if (zSep < 1) 
+								dockingStep = DockingStep.MOVING_TO_START;
+                        }
+					}
+
                     break;
 
                 default:

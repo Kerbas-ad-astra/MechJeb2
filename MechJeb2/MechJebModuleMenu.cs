@@ -2,8 +2,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
+using KSP.UI.Screens;
 using UnityEngine;
 
 namespace MuMech
@@ -245,7 +245,7 @@ namespace MuMech
 
         private void ClearButtons()
         {
-            if (mjButton != null)
+            if (mjButton != null && mjButton.gameObject != null) 
             {
                 ApplicationLauncher.Instance.RemoveModApplication(mjButton);
                 mjButton = null;
@@ -358,14 +358,14 @@ namespace MuMech
                 }
             }
 
-            if (HighLogic.LoadedSceneIsEditor || vessel.isActiveVessel)
+            if (HighLogic.LoadedSceneIsEditor || (vessel != null && vessel.isActiveVessel))
             {
                 SetupAppLauncher();
                 SetupToolBarButtons();
             }
         }
 
-        class DisplayOrder : IComparer<DisplayModule>
+        public class DisplayOrder : IComparer<DisplayModule>
         {
             private DisplayOrder() { }
             public static DisplayOrder instance = new DisplayOrder();

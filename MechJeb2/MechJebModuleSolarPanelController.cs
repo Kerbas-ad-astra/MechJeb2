@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 namespace MuMech
@@ -34,12 +32,22 @@ namespace MuMech
             return sa.Events["Extend"].active || sa.Events["Retract"].active;
         }
 
-        [GeneralInfoItem("Extend all solar panels", InfoItem.Category.Misc, showInEditor = false)]
-        public void ExtendAllSolarPanelsInfoItem()
+        [GeneralInfoItem("Toggle all solar panels", InfoItem.Category.Misc, showInEditor = false)]
+        public void ToggleAllSolarPanelsInfoItem()
         {
-            if (GUILayout.Button("Extend all solar panels"))
+            if (AllRetracted())
             {
-                ExtendAll();
+                if (GUILayout.Button("Extend all solar panels"))
+                {
+                    ExtendAll();
+                }
+            }
+            else
+            {
+                if (GUILayout.Button("Retract all solar panels"))
+                {
+                    RetractAll();
+                }
             }
         }
 
@@ -51,22 +59,14 @@ namespace MuMech
                 if (p.ShieldedFromAirstream)
                     continue;
 
-                foreach (ModuleDeployableSolarPanel sa in p.Modules.OfType<ModuleDeployableSolarPanel>())
+                var solar = p.Modules.GetModules<ModuleDeployableSolarPanel>();
+                for (int j = 0; j < solar.Count; j++)
                 {
-                    if (isDeployable(sa))
+                    if (isDeployable(solar[j]))
                     {
-                        sa.Extend();
+                        solar[j].Extend();
                     }
                 }
-            }
-        }
-
-        [GeneralInfoItem("Retract all solar panels", InfoItem.Category.Misc, showInEditor = false)]
-        public void RetractAllSolarPanelsInfoItem()
-        {
-            if (GUILayout.Button("Retract all solar panels"))
-            {
-                RetractAll();
             }
         }
 
@@ -77,11 +77,12 @@ namespace MuMech
                 Part p = vessel.parts[i];
                 if (p.ShieldedFromAirstream)
                     continue;
-                foreach (ModuleDeployableSolarPanel sa in p.Modules.OfType<ModuleDeployableSolarPanel>())
-                {
-                    if (isDeployable(sa))
+                var solar = p.Modules.GetModules<ModuleDeployableSolarPanel>();
+                for (int j = 0; j < solar.Count; j++)
                     {
-                        sa.Retract();
+                    if (isDeployable(solar[j]))
+                    {
+                        solar[j].Retract();
                     }
                 }
             }
@@ -94,9 +95,11 @@ namespace MuMech
                 Part p = vessel.parts[i];
                 if (p.ShieldedFromAirstream)
                     continue;
-                foreach (ModuleDeployableSolarPanel sa in p.Modules.OfType<ModuleDeployableSolarPanel>())
+                var solar = p.Modules.GetModules<ModuleDeployableSolarPanel>();
+                for (int j = 0; j < solar.Count; j++)
                 {
-                    if (isDeployable(sa) &&
+                    ModuleDeployableSolarPanel sa = solar[j];
+                    if (isDeployable(sa) && 
                         ((sa.panelState == ModuleDeployableSolarPanel.panelStates.EXTENDED) ||
                          (sa.panelState == ModuleDeployableSolarPanel.panelStates.EXTENDING) ||
                          (sa.panelState == ModuleDeployableSolarPanel.panelStates.RETRACTING)))

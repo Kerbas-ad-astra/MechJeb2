@@ -1,7 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Reflection;
 using UnityEngine;
 
@@ -14,6 +12,8 @@ namespace MuMech
             return PartResourceLibrary.Instance.GetDefinition(type).density;
         }
 
+        private static readonly string[] units = { "y", "z", "a", "f", "p", "n", "μ", "m", "", "k", "M", "G", "T", "P", "E", "Z", "Y" };
+
         //Puts numbers into SI format, e.g. 1234 -> "1.234 k", 0.0045678 -> "4.568 m"
         //maxPrecision is the exponent of the smallest place value that will be shown; for example
         //if maxPrecision = -1 and digitsAfterDecimal = 3 then 12.345 will be formatted as "12.3"
@@ -23,8 +23,7 @@ namespace MuMech
             if (d == 0 || double.IsInfinity(d) || double.IsNaN(d)) return d.ToString() + " ";
 
             int exponent = (int)Math.Floor(Math.Log10(Math.Abs(d))); //exponent of d if it were expressed in scientific notation
-
-            string[] units = new string[] { "y", "z", "a", "f", "p", "n", "μ", "m", "", "k", "M", "G", "T", "P", "E", "Z", "Y" };
+            
             const int unitIndexOffset = 8; //index of "" in the units array
             int unitIndex = (int)Math.Floor(exponent / 3.0) + unitIndexOffset;
             if (unitIndex < 0) unitIndex = 0;
@@ -44,7 +43,7 @@ namespace MuMech
             return ret;
         }
 
-        public static string padPositive(double x, string format = "F3")
+        public static string PadPositive(double x, string format = "F3")
         {
             string s = x.ToString(format);
             return s[0] == '-' ? s : " " + s;
@@ -52,12 +51,12 @@ namespace MuMech
 
         public static string PrettyPrint(Vector3d vector, string format = "F3")
         {
-            return "[" + padPositive(vector.x, format) + ", " + padPositive(vector.y, format) + ", " + padPositive(vector.z, format) + " ]";
+            return "[" + PadPositive(vector.x, format) + ", " + PadPositive(vector.y, format) + ", " + PadPositive(vector.z, format) + " ]";
         }
 
         public static string PrettyPrint(Quaternion quaternion, string format = "F3")
         {
-            return "[" + padPositive(quaternion.x, format) + ", " + padPositive(quaternion.y, format) + ", " + padPositive(quaternion.z, format) + ", " + padPositive(quaternion.w ,format) + "]";
+            return "[" + PadPositive(quaternion.x, format) + ", " + PadPositive(quaternion.y, format) + ", " + PadPositive(quaternion.z, format) + ", " + PadPositive(quaternion.w ,format) + "]";
         }
 
         //For some reason, Math doesn't have the inverse hyperbolic trigonometric functions:
@@ -227,6 +226,30 @@ namespace MuMech
                 }
             }
         }
+
+        public static Color HSVtoRGB(float hue, float saturation, float value, float alpha)
+        {
+            int hi = Convert.ToInt32(Math.Floor(hue / 60)) % 6;
+            float f = hue / 60 - Mathf.Floor(hue / 60);
+
+            float v = value;
+            float p = value * (1 - saturation);
+            float q = value * (1 - f * saturation);
+            float t = value * (1 - (1 - f) * saturation);
+
+            if (hi == 0)
+                return new Color(v, t, p, alpha);
+            if (hi == 1)           
+                return new Color(q, v, p, alpha);
+            if (hi == 2)           
+                return new Color(p, v, t, alpha);
+            if (hi == 3)           
+                return new Color(p, q, v, alpha);
+            if (hi == 4)           
+                return new Color(t, p, v, alpha);
+                                    
+            return new Color(v, p, q, alpha);
+        }
     }
 
     public class MovingAverage
@@ -240,9 +263,9 @@ namespace MuMech
             get
             {
                 double tmp = 0;
-                foreach (double i in store)
+                for (int i = 0; i < store.Length; i++)
                 {
-                    tmp += i;
+                    tmp += store[i];
                 }
                 return tmp / storeSize;
             }
@@ -284,19 +307,139 @@ namespace MuMech
         }
     }
 
+    public class MovingAverage3d
+    {
+        private Vector3d[] store;
+        private int storeSize;
+        private int nextIndex = 0;
+
+        public Vector3d value
+        {
+            get
+            {
+                Vector3d tmp = Vector3d.zero;
+                for (int i = 0; i < store.Length; i++)
+                {
+                    tmp += store[i];
+                }
+                return tmp / storeSize;
+            }
+            set
+            {
+                store[nextIndex] = value;
+                nextIndex = (nextIndex + 1) % storeSize;
+            }
+        }
+
+        public MovingAverage3d(int size = 10, Vector3d startingValue = default(Vector3d))
+        {
+            storeSize = size;
+            store = new Vector3d[size];
+            force(startingValue);
+        }
+
+        public void force(Vector3d newValue)
+        {
+            for (int i = 0; i < storeSize; i++)
+            {
+                store[i] = newValue;
+            }
+        }
+
+        public static implicit operator Vector3d(MovingAverage3d v)
+        {
+            return v.value;
+        }
+        
+        public override string ToString()
+        {
+            return value.ToString();
+        }
+
+        public string ToString(string format)
+        {
+            return MuUtils.PrettyPrint(value, format);
+        }
+    }
+
+    //A simple wrapper around a Dictionary, with the only change being that
+    //The keys are also stored in a list so they can be iterated without allocating an IEnumerator
+    class KeyableDictionary<TKey, TValue> : IDictionary<TKey, TValue>
+    {
+        protected Dictionary<TKey, TValue> d = new Dictionary<TKey, TValue>();
+        // Also store the keys in a list so we can iterate them without allocating an IEnumerator
+        protected List<TKey> k = new List<TKey>();
+        
+        public virtual TValue this[TKey key]
+        {
+            get
+            {
+                return d[key];
+            }
+            set
+            {
+                if (d.ContainsKey(key)) d[key] = value;
+                else
+                {
+                    k.Add(key);
+                    d.Add(key, value);
+                }
+            }
+        }
+
+        public void Add(TKey key, TValue value)
+        {
+            k.Add(key);
+            d.Add(key, value);
+        }
+        public bool ContainsKey(TKey key) { return d.ContainsKey(key); }
+        public ICollection<TKey> Keys { get { return d.Keys; } }
+        public List<TKey> KeysList { get { return k; } }
+
+        public bool Remove(TKey key)
+        {
+            return d.Remove(key) && k.Remove(key);
+        }
+        public bool TryGetValue(TKey key, out TValue value) { return d.TryGetValue(key, out value); }
+        public ICollection<TValue> Values { get { return d.Values; } }
+
+        public void Add(KeyValuePair<TKey, TValue> item)
+        {
+            ((IDictionary<TKey, TValue>)d).Add(item);
+            k.Add(item.Key);
+        }
+
+        public void Clear()
+        {
+            d.Clear();
+            k.Clear();
+        }
+        public bool Contains(KeyValuePair<TKey, TValue> item) { return ((IDictionary<TKey, TValue>)d).Contains(item); }
+        public void CopyTo(KeyValuePair<TKey, TValue>[] array, int arrayIndex) { ((IDictionary<TKey, TValue>)d).CopyTo(array, arrayIndex); }
+        public int Count { get { return d.Count; } }
+        public bool IsReadOnly { get { return ((IDictionary<TKey, TValue>)d).IsReadOnly; } }
+
+        public bool Remove(KeyValuePair<TKey, TValue> item)
+        {
+            return ((IDictionary<TKey, TValue>)d).Remove(item) && k.Remove(item.Key);
+        }
+        public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator() { return d.GetEnumerator(); }
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() { return ((System.Collections.IEnumerable)d).GetEnumerator(); }
+    }
+
+
     //A simple wrapper around a Dictionary, with the only change being that
     //accessing the value of a nonexistent key returns a default value instead of an error.
-    class DefaultableDictionary<TKey, TValue> : IDictionary<TKey, TValue>
+    class DefaultableDictionary<TKey, TValue> : KeyableDictionary<TKey, TValue>
     {
-        Dictionary<TKey, TValue> d = new Dictionary<TKey, TValue>();
-        TValue defaultValue;
+        private readonly TValue defaultValue;
 
         public DefaultableDictionary(TValue defaultValue)
         {
             this.defaultValue = defaultValue;
         }
 
-        public TValue this[TKey key]
+        public override TValue this[TKey key]
         {
             get
             {
@@ -306,27 +449,15 @@ namespace MuMech
             set
             {
                 if (d.ContainsKey(key)) d[key] = value;
-                else d.Add(key, value);
+                else
+                {
+                    k.Add(key);
+                    d.Add(key, value);
+                }
             }
         }
-
-        public void Add(TKey key, TValue value) { d.Add(key, value); }
-        public bool ContainsKey(TKey key) { return d.ContainsKey(key); }
-        public ICollection<TKey> Keys { get { return d.Keys; } }
-        public bool Remove(TKey key) { return d.Remove(key); }
-        public bool TryGetValue(TKey key, out TValue value) { return d.TryGetValue(key, out value); }
-        public ICollection<TValue> Values { get { return d.Values; } }
-        public void Add(KeyValuePair<TKey, TValue> item) { ((IDictionary<TKey, TValue>)d).Add(item); }
-        public void Clear() { d.Clear(); }
-        public bool Contains(KeyValuePair<TKey, TValue> item) { return ((IDictionary<TKey, TValue>)d).Contains(item); }
-        public void CopyTo(KeyValuePair<TKey, TValue>[] array, int arrayIndex) { ((IDictionary<TKey, TValue>)d).CopyTo(array, arrayIndex); }
-        public int Count { get { return d.Count; } }
-        public bool IsReadOnly { get { return ((IDictionary<TKey, TValue>)d).IsReadOnly; } }
-        public bool Remove(KeyValuePair<TKey, TValue> item) { return ((IDictionary<TKey, TValue>)d).Remove(item); }
-        public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator() { return d.GetEnumerator(); }
-        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() { return ((System.Collections.IEnumerable)d).GetEnumerator(); }
     }
-
+    
     //Represents a 2x2 matrix
     public class Matrix2x2
     {
@@ -374,7 +505,18 @@ namespace MuMech
             set { e[i, j] = value; }
         }
 
-		public Matrix3x3f transpose()
+        public void reset()
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    e[i, j] = 0;
+                }
+            }
+        }
+
+        public Matrix3x3f transpose()
 		{
 			Matrix3x3f ret = new Matrix3x3f();
 			for (int i = 0; i < 3; i++)

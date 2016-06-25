@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using UnityEngine;
-using System.Text.RegularExpressions;
+using KSP.UI.Screens;
 
 namespace MuMech
 {
@@ -27,7 +25,7 @@ namespace MuMech
         protected bool autoMode = false;
 
         [Persistent(pass = (int)Pass.Local)]
-        public string trans_spd = "0";
+        public EditableDouble trans_spd = new EditableDouble(0);
 
         public MechJebModuleTranslatron(MechJebCore core) : base(core) { }
 
@@ -74,16 +72,32 @@ namespace MuMech
                 MechJebModuleThrustController.TMode newMode = (MechJebModuleThrustController.TMode)GUILayout.SelectionGrid((int)core.thrust.tmode, trans_texts, 2, sty);
                 SetMode(newMode);
 
+                float val = (GameSettings.MODIFIER_KEY.GetKey() ? 5 : 1); // change by 5 if the mod_key is held down, else by 1 -- would be better if it actually worked...
+
                 core.thrust.trans_kill_h = GUILayout.Toggle(core.thrust.trans_kill_h, "Kill H/S", GUILayout.ExpandWidth(true));
                 GUILayout.BeginHorizontal(GUILayout.ExpandWidth(true));
-                GUILayout.Label("Speed");
-                trans_spd = GUILayout.TextField(trans_spd, GUILayout.ExpandWidth(true));
-                trans_spd = Regex.Replace(trans_spd, @"[^\d.+-]", "");
+                GuiUtils.SimpleTextBox("Speed", trans_spd, "", 37);
+                bool change = false;
+                if (GUILayout.Button("-", GUILayout.ExpandWidth(false)))
+                {
+                    trans_spd -= val;
+                    change = true;
+                }
+                if (GUILayout.Button("0", GUILayout.ExpandWidth(false)))
+                {
+                    trans_spd = 0;
+                    change = true;
+                }
+                if (GUILayout.Button("+", GUILayout.ExpandWidth(false)))
+                {
+                    trans_spd += val;
+                    change = true;
+                }
                 GUILayout.EndHorizontal();
 
-                if (GUILayout.Button("EXECUTE", sty, GUILayout.ExpandWidth(true)))
+                if (GUILayout.Button("EXECUTE", sty, GUILayout.ExpandWidth(true)) || change)
                 {
-                    core.thrust.trans_spd_act = Convert.ToSingle(trans_spd);
+                    core.thrust.trans_spd_act = (float)trans_spd.val;
                     GUIUtility.keyboardControl = 0;
                 }
             }
@@ -155,7 +169,7 @@ namespace MuMech
 
         public void recursiveDecouple()
         {
-            int minStage = Staging.lastStage;
+            int minStage = StageManager.LastStage;
             for (int i = 0; i < part.vessel.parts.Count; i++)
             {
                 Part child = part.vessel.parts[i];
@@ -184,14 +198,14 @@ namespace MuMech
             }
             if (part.vessel == FlightGlobals.ActiveVessel)
             {
-                Staging.ActivateStage(minStage);
+                StageManager.ActivateStage(minStage);
             }
         }
 
         public override void Drive(FlightCtrlState s)
         {
-            // Fix the Translatron behavuous with kill HS.
-            // TODO : proper fix that register the attitude controler oustide of Drive
+            // Fix the Translatron behavior which kill HS.
+            // TODO : proper fix that register the attitude controler outside of Drive
             if (!core.attitude.users.Contains(this) && ( core.thrust.trans_kill_h && core.thrust.tmode != MechJebModuleThrustController.TMode.OFF)) { core.attitude.users.Add(this); }
             if ( core.attitude.users.Contains(this) && (!core.thrust.trans_kill_h || core.thrust.tmode == MechJebModuleThrustController.TMode.OFF)) { core.attitude.users.Remove(this); }
 

@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using UnityEngine;
 
 namespace MuMech
@@ -58,6 +55,12 @@ namespace MuMech
         [Persistent(pass = (int)Pass.Global)]
         public bool showInEditor = false;
 
+        [Persistent(pass = (int)Pass.Global)]
+        public bool isOverlay = false;
+
+        internal bool enabledEditor;
+        internal bool enabledFlight;
+
         public bool showInCurrentScene { get { return (HighLogic.LoadedSceneIsEditor ? showInEditor : showInFlight); } }
 
         public int ID;
@@ -77,7 +80,7 @@ namespace MuMech
 
         protected void WindowGUI(int windowID, bool draggable)
         {
-            if (GUI.Button(new Rect(windowPos.width - 18, 2, 16, 16), ""))
+            if (!isOverlay && GUI.Button(new Rect(windowPos.width - 18, 2, 16, 16), ""))
             {
                 enabled = false;
             }
@@ -87,8 +90,8 @@ namespace MuMech
 //                locked = !locked;
 //            }
             
-            bool allowDrag = true;
-            if (core.settings.useTitlebarDragging)
+            bool allowDrag = !locked;
+            if (locked && !isOverlay && core.settings.useTitlebarDragging)
             {
                 float x = Mouse.screenPos.x / GuiUtils.scale;
                 float y = Mouse.screenPos.y / GuiUtils.scale;
@@ -100,6 +103,13 @@ namespace MuMech
                 GUI.DragWindow();
         }
 
+        protected void ProfiledWindowGUI(int windowID)
+        {
+            Profiler.BeginSample(GetType().Name);
+            WindowGUI(windowID);
+            Profiler.EndSample();
+        }
+
         protected virtual void WindowGUI(int windowID)
         {
             WindowGUI(windowID, true);
@@ -109,7 +119,7 @@ namespace MuMech
         {
             if (showInCurrentScene)
             {
-                windowPos = GUILayout.Window(ID, windowPos, WindowGUI, GetName(), WindowOptions());
+                windowPos = GUILayout.Window(ID, windowPos, ProfiledWindowGUI, isOverlay ? "" : GetName(), WindowOptions());
 
                 //                var windows = core.GetComputerModules<DisplayModule>(); // on ice until there's a way to find which window is active, unless you like dragging other windows by snapping
                 //                
@@ -139,7 +149,16 @@ namespace MuMech
         {
             base.OnSave(local, type, global);
 
-            if (global != null) global.AddValue("enabled", enabled);
+            if (global != null)
+            {
+                if (HighLogic.LoadedSceneIsEditor)
+                    enabledEditor = enabled;
+                if (HighLogic.LoadedSceneIsFlight)
+                    enabledFlight = enabled;
+                
+                global.AddValue("enabledEditor", enabledEditor);
+                global.AddValue("enabledFlight", enabledFlight);
+            }
 //            if (global != null) global.AddValue("locked", locked);
         }
 
@@ -147,17 +166,50 @@ namespace MuMech
         {
             base.OnLoad(local, type, global);
 
-            if (global != null && global.HasValue("enabled"))
+            bool useOldConfig = true;
+            if (global != null && global.HasValue("enabledEditor"))
             {
                 bool loadedEnabled;
-                if (bool.TryParse(global.GetValue("enabled"), out loadedEnabled)) enabled = loadedEnabled;
+                if (bool.TryParse(global.GetValue("enabledEditor"), out loadedEnabled))
+                {
+                    enabledEditor = loadedEnabled;
+                    useOldConfig = false;
+                    if (HighLogic.LoadedSceneIsEditor)
+                        enabled = loadedEnabled;
+                }
             }
 
-//            if (global != null && global.HasValue("locked"))
-//            {
-//                bool loadedLocked;
-//                if (bool.TryParse(global.GetValue("locked"), out loadedLocked)) locked = loadedLocked;
-//            }
+            if (global != null && global.HasValue("enabledFlight"))
+            {
+                bool loadedEnabled;
+                if (bool.TryParse(global.GetValue("enabledFlight"), out loadedEnabled))
+                {
+                    enabledFlight = loadedEnabled;
+                    useOldConfig = false;
+                    if (HighLogic.LoadedSceneIsFlight)
+                        enabled = loadedEnabled;
+                }
+            }
+
+            if (useOldConfig)
+            {
+                if (global != null && global.HasValue("enabled"))
+                {
+                    bool loadedEnabled;
+                    if (bool.TryParse(global.GetValue("enabled"), out loadedEnabled))
+                    {
+                        enabled = loadedEnabled;
+                    }
+                }
+                enabledEditor = enabled;
+                enabledFlight = enabled;
+            }
+            
+            //            if (global != null && global.HasValue("locked"))
+            //            {
+            //                bool loadedLocked;
+            //                if (bool.TryParse(global.GetValue("locked"), out loadedLocked)) locked = loadedLocked;
+            //            }
         }
 
         public virtual bool isActive()

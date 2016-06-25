@@ -2,8 +2,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Linq.Expressions;
-using System.Text;
 using System.Reflection;
 using UnityEngine;
 using KSP.IO;
@@ -18,13 +16,17 @@ namespace MuMech
         private List<ComputerModule> unorderedComputerModules = new List<ComputerModule>();
         private List<ComputerModule> modulesToLoad = new List<ComputerModule>();
 
-        private Dictionary<object, IEnumerable<ComputerModule>> sortedModules = new Dictionary<object, IEnumerable<ComputerModule>>();
-        private Dictionary<object, IEnumerable<DisplayModule>> sortedDisplayModules = new Dictionary<object, IEnumerable<DisplayModule>>();
+        private Dictionary<Type, List<ComputerModule>> sortedModules = new Dictionary<Type, List<ComputerModule>>();
+        private Dictionary<object, List<DisplayModule>> sortedDisplayModules = new Dictionary<object, List<DisplayModule>>();
 
         // Reference to the parts base config. See Onload for explanation
         private static Dictionary<string, ConfigNode> savedConfig = new Dictionary<string, ConfigNode>();
 
+        private List<Callback> postDrawQueue = new List<Callback>();
+
         private static List<Type> moduleRegistry;
+
+        private bool ready = false;
 
         public MechJebModuleAttitudeController attitude;
         public MechJebModuleStagingController staging;
@@ -67,7 +69,7 @@ namespace MuMech
             {
                 MechJebCore mj = vessel.GetMasterMechJeb();
                 if (mj != null)
-                    vessel.GetMasterMechJeb().deactivateControl = value;
+                    mj.deactivateControl = value;
             }
         }
 
@@ -79,6 +81,8 @@ namespace MuMech
 
         [KSPField(isPersistant = false)]
         public bool eduMode = false;
+        
+        public bool rssMode { get { return settings.rssMode; } }
 
         [KSPAction("Orbit Prograde")]
         public void OnOrbitProgradeAction(KSPActionParam param)
@@ -318,34 +322,52 @@ namespace MuMech
 
         public T GetComputerModule<T>() where T : ComputerModule
         {
-            return unorderedComputerModules.OfType<T>().FirstOrDefault();//returns null if no matches
+            for (int i = 0; i < unorderedComputerModules.Count; i++)
+            {
+                ComputerModule pm = unorderedComputerModules[i];
+                T module = pm as T;
+                if (module != null)
+                    return module;
+            }
+            return null;
         }
 
-        public IEnumerable<T> GetComputerModules<T>() where T : ComputerModule
+        // The pure generic version was creating too much garbage
+        public List<ComputerModule> GetComputerModules<T>() where T : ComputerModule
         {
             Type key = typeof(T);
-            IEnumerable<ComputerModule> value;
+            List<ComputerModule> value;
             if (sortedModules.TryGetValue(key, out value))
-                return value.Cast<T>();
+                return value;
             sortedModules[key] = value = unorderedComputerModules.OfType<T>().Cast<ComputerModule>().OrderBy(m => m).ToList();
-            return value.Cast<T>();
+            return value;
         }
+
+        //public IEnumerable<T> GetComputerModules<T>() where T : ComputerModule
+        //{
+        //    Type key = typeof(T);
+        //    IEnumerable<ComputerModule> value;
+        //    if (sortedModules.TryGetValue(key, out value))
+        //        return value.Cast<T>();
+        //    sortedModules[key] = value = unorderedComputerModules.OfType<T>().Cast<ComputerModule>().OrderBy(m => m).ToList();
+        //    return value.Cast<T>();
+        //}
 
         // Return the list of modules of type T in the order specified by comparer function
         // Be sure to always use the same instance of comparer in order to avoid memory leaks
-        public IEnumerable<T> GetComputerModules<T>(IComparer<T> comparer) where T : ComputerModule
-        {
-            IEnumerable<ComputerModule> value;
-            if (sortedModules.TryGetValue(comparer, out value))
-                return value.Cast<T>();
-            sortedModules[comparer] = value = unorderedComputerModules.OfType<T>().OrderBy(m => m, comparer).Cast<ComputerModule>().ToList();
-            return value.Cast<T>();
-        }
+        //public IEnumerable<T> GetComputerModules<T>(IComparer<T> comparer) where T : ComputerModule
+        //{
+        //    IEnumerable<ComputerModule> value;
+        //    if (sortedModules.TryGetValue(comparer, out value))
+        //        return value.Cast<T>();
+        //    sortedModules[comparer] = value = unorderedComputerModules.OfType<T>().OrderBy(m => m, comparer).Cast<ComputerModule>().ToList();
+        //    return value.Cast<T>();
+        //}
 
         // Added because the generic version eats memory like candy when casting from ComputerModule to DisplayModule (.Cast<T>())
-        public IEnumerable<DisplayModule> GetDisplayModules(IComparer<DisplayModule> comparer)
+        public List<DisplayModule> GetDisplayModules(IComparer<DisplayModule> comparer)
         {
-            IEnumerable<DisplayModule> value;
+            List<DisplayModule> value;
             if (sortedDisplayModules.TryGetValue(comparer, out value))
                 return value;
             sortedDisplayModules[comparer] = value = unorderedComputerModules.OfType<DisplayModule>().OrderBy(m => m, comparer).ToList();
@@ -412,6 +434,8 @@ namespace MuMech
 
         public override void OnStart(PartModule.StartState state)
         {
+            if (HighLogic.LoadedSceneIsEditor)
+                ready = true;
             if (state == PartModule.StartState.None) return; //don't do anything when we start up in the loading screen
 
             //OnLoad doesn't get called for parts created in editor, so do that manually so 
@@ -501,6 +525,9 @@ namespace MuMech
 
         public void FixedUpdate()
         {
+            if (!FlightGlobals.ready)
+                return;
+
             LoadDelayedModules();
 
             CheckControlledVessel(); //make sure our onFlyByWire callback is registered with the right vessel
@@ -514,6 +541,7 @@ namespace MuMech
             {
                 return;
             }
+            Profiler.BeginSample("MechJebCore.FixedUpdate");
 
             if (!wasMasterAndFocus && (HighLogic.LoadedSceneIsEditor || vessel.isActiveVessel))
             {
@@ -532,29 +560,42 @@ namespace MuMech
                 lastFocus = vessel;
             }
 
-            if (vessel == null) return; //don't run ComputerModules' OnFixedUpdate in editor
+            if (vessel == null)
+            {
+                Profiler.EndSample();
+                return; //don't run ComputerModules' OnFixedUpdate in editor
+            }
 
-            vesselState.Update(vessel);
+            Profiler.BeginSample("vesselState");
+            ready = vesselState.Update(vessel);
+            Profiler.EndSample();
 
             foreach (ComputerModule module in GetComputerModules<ComputerModule>())
             {
+                Profiler.BeginSample(module.profilerName);
                 try
                 {
-                    if (module.enabled) module.OnFixedUpdate();
+                    if (module.enabled)
+                    {
+                        module.OnFixedUpdate();
+                    }
                 }
                 catch (Exception e)
                 {
                     Debug.LogError("MechJeb module " + module.GetType().Name + " threw an exception in OnFixedUpdate: " + e);
                 }
+                Profiler.EndSample();
             }
+            Profiler.EndSample();
         }
 
         public void Update()
         {
-            if (this != vessel.GetMasterMechJeb())
+            if (this != vessel.GetMasterMechJeb() || (!FlightGlobals.ready && HighLogic.LoadedSceneIsFlight) || !ready)
             {
                 return;
             }
+            Profiler.BeginSample("MechJebCore.Update");
 
             if (Input.GetKeyDown(KeyCode.V) && (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)))
             {
@@ -563,7 +604,7 @@ namespace MuMech
             }
 
             //periodically save settings in case we quit unexpectedly
-            if (HighLogic.LoadedSceneIsEditor || vessel.isActiveVessel)
+            if (HighLogic.LoadedSceneIsEditor || (vessel != null && vessel.isActiveVessel))
             {
                 if (Time.time > lastSettingsSaveTime + 5)
                 {
@@ -588,12 +629,19 @@ namespace MuMech
                 }
             }
 
+            Profiler.BeginSample("OnMenuUpdate");
             GetComputerModule<MechJebModuleMenu>().OnMenuUpdate(); // Allow the menu movement, even while in Editor
-
-            if (vessel == null) return; //don't run ComputerModules' OnUpdate in editor
+            Profiler.EndSample();
+            
+            if (vessel == null)
+            {
+                Profiler.EndSample();
+                return; //don't run ComputerModules' OnUpdate in editor
+            }
 
             foreach (ComputerModule module in GetComputerModules<ComputerModule>())
             {
+                Profiler.BeginSample(module.profilerName);
                 try
                 {
                     if (module.enabled) module.OnUpdate();
@@ -602,7 +650,9 @@ namespace MuMech
                 {
                     Debug.LogError("MechJeb module " + module.GetType().Name + " threw an exception in OnUpdate: " + e);
                 }
+                Profiler.EndSample();
             }
+            Profiler.EndSample();
         }
 
         void LoadComputerModules()
@@ -633,15 +683,17 @@ namespace MuMech
             // So we use an other field to store the dev build number ...
             Attribute[] attributes = Attribute.GetCustomAttributes(assembly, typeof(AssemblyInformationalVersionAttribute));
             string dev_version = "";
-            if (attributes != null && attributes.Length != 0)
+            if (attributes.Length > 0)
             {
-                dev_version = ((AssemblyInformationalVersionAttribute)(attributes[0])).InformationalVersion;
+                dev_version = ((AssemblyInformationalVersionAttribute)attributes[0]).InformationalVersion;
             }
 
             if (dev_version == "")
-                version = fileVersionInfo.FileMajorPart + "." + fileVersionInfo.FileMinorPart + "." + fileVersionInfo.FileBuildPart;
+                version = string.Format("{0}.{1}.{2}", fileVersionInfo.FileMajorPart, fileVersionInfo.FileMinorPart, fileVersionInfo.FileBuildPart);
             else
                 version = dev_version;
+
+            print("Loading Mechjeb " + version);
 
             try
             {
@@ -651,7 +703,9 @@ namespace MuMech
                         && (t != typeof(AutopilotModule))
                         && !blacklist.Contains(t.Name) && (GetComputerModule(t.Name) == null))
                     {
-                        AddComputerModule((ComputerModule)(t.GetConstructor(new Type[] { typeof(MechJebCore) }).Invoke(new object[] { this })));
+                        ConstructorInfo constructorInfo = t.GetConstructor(new[] { typeof(MechJebCore) });
+                        if (constructorInfo != null)
+                            AddComputerModule((ComputerModule)(constructorInfo.Invoke(new object[] { this })));
                     }
                 }
             }
@@ -723,7 +777,7 @@ namespace MuMech
                 }
 
                 ConfigNode type = new ConfigNode("MechJebTypeSettings");
-                String vesselName = vessel != null ? string.Join("_", vessel.vesselName.Split(System.IO.Path.GetInvalidFileNameChars())) : ""; // Strip illegal char from the filename
+                string vesselName = vessel != null ? string.Join("_", vessel.vesselName.Split(System.IO.Path.GetInvalidFileNameChars())) : ""; // Strip illegal char from the filename
                 if ((vessel != null) && File.Exists<MechJebCore>("mechjeb_settings_type_" + vesselName + ".cfg"))
                 {
                     try
@@ -858,7 +912,7 @@ namespace MuMech
                 // So we don't save in that case, which is not that bad since nearly nothing use vessel settings in the editor.
                 if (vessel != null)
                 {
-                    string vesselName = (HighLogic.LoadedSceneIsEditor ? EditorLogic.fetch.shipNameField.Text : vessel.vesselName);
+                    string vesselName = (HighLogic.LoadedSceneIsEditor ? EditorLogic.fetch.shipNameField.text : vessel.vesselName);
                     vesselName = string.Join("_", vesselName.Split(Path.GetInvalidFileNameChars())); // Strip illegal char from the filename
                     type.Save(IOUtils.GetFilePathFor(this.GetType(), "mechjeb_settings_type_" + vesselName + ".cfg"));
                 }
@@ -922,10 +976,12 @@ namespace MuMech
 
         private void Drive(FlightCtrlState s)
         {
+            Profiler.BeginSample("MechJebCore.Drive");
             if (this == vessel.GetMasterMechJeb())
             {
                 foreach (ComputerModule module in GetComputerModules<ComputerModule>())
                 {
+                    Profiler.BeginSample(module.profilerName);
                     try
                     {
                         if (module.enabled) module.Drive(s);
@@ -934,13 +990,15 @@ namespace MuMech
                     {
                         Debug.LogError("MechJeb module " + module.GetType().Name + " threw an exception in Drive: " + e);
                     }
+                    Profiler.EndSample();
                 }
             }
+            Profiler.EndSample();
         }
 
         //Setting FlightCtrlState fields to bad values can really mess up the game.
         //Here we do some error checking.
-        public void CheckFlightCtrlState(FlightCtrlState s)
+        private static void CheckFlightCtrlState(FlightCtrlState s)
         {
             if (float.IsNaN(s.mainThrottle)) s.mainThrottle = 0;
             if (float.IsNaN(s.yaw)) s.yaw = 0;
@@ -970,7 +1028,9 @@ namespace MuMech
 
         private void OnGUI()
         {
-            if (!showGui || this != vessel.GetMasterMechJeb()) return;
+            if (!showGui || this != vessel.GetMasterMechJeb() || (!FlightGlobals.ready && HighLogic.LoadedSceneIsFlight)  || !ready) return;
+
+            Profiler.BeginSample("MechJebCore.OnGUI");
 
             if (HighLogic.LoadedSceneIsEditor || (FlightGlobals.ready && (vessel == FlightGlobals.ActiveVessel) && (part.State != PartStates.DEAD)))
             {
@@ -985,6 +1045,7 @@ namespace MuMech
 
                 foreach (DisplayModule module in GetComputerModules<DisplayModule>())
                 {
+                    Profiler.BeginSample(module.profilerName);
                     try
                     {
                         if (module.enabled) module.DrawGUI(HighLogic.LoadedSceneIsEditor);
@@ -993,12 +1054,24 @@ namespace MuMech
                     {
                         Debug.LogError("MechJeb module " + module.GetType().Name + " threw an exception in DrawGUI: " + e);
                     }
+                    Profiler.EndSample();
                 }
 
                 if (HighLogic.LoadedSceneIsEditor) PreventEditorClickthrough();
                 if (HighLogic.LoadedSceneIsFlight || HighLogic.LoadedSceneHasPlanetarium) PreventInFlightClickthrough();
                 GUI.matrix = previousGuiMatrix;
+
+                for (int i = 0; i < postDrawQueue.Count; i++)
+                {
+                    postDrawQueue[i]();
+                }
             }
+            Profiler.EndSample();
+        }
+
+        internal void AddToPostDrawQueue(Callback c)
+        {
+            postDrawQueue.Add(c);
         }
 
         // VAB/SPH description
@@ -1028,7 +1101,7 @@ namespace MuMech
             bool mouseOverWindow = GuiUtils.MouseIsOverWindow(this);
             if (!weLockedInputs && mouseOverWindow && !Input.GetMouseButton(1))
             {
-                InputLockManager.SetControlLock(ControlTypes.CAMERACONTROLS | ControlTypes.MAP, "MechJeb_noclick");
+                InputLockManager.SetControlLock(ControlTypes.ALLBUTCAMERAS, "MechJeb_noclick");
                 weLockedInputs = true;
             }
             if (weLockedInputs && !mouseOverWindow)

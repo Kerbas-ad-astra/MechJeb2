@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using UnityEngine;
 using System.Threading;
 
 namespace MuMech
@@ -21,14 +18,21 @@ namespace MuMech
         public FuelFlowSimulation.Stats[] atmoStats = { };
         public FuelFlowSimulation.Stats[] vacStats = { };
 
-        public void RequestUpdate(object controller)
+        public void RequestUpdate(object controller, bool wait = false)
         {
             users.Add(controller);
             updateRequested = true;
 
             if (HighLogic.LoadedSceneIsEditor && editorBody != null)
             {
-                TryStartSimulation();
+                if (TryStartSimulation() && wait)
+                {
+                    while (simulationRunning)
+                    {
+                        // wait for a sim to be ready. Risked ?
+                        Thread.Sleep(1);
+                    }
+                }
             }
         }
 
@@ -39,6 +43,8 @@ namespace MuMech
         protected bool updateRequested = false;
         protected bool simulationRunning = false;
         protected System.Diagnostics.Stopwatch stopwatch = new System.Diagnostics.Stopwatch();
+
+        private FuelFlowSimulation[] sims = { new FuelFlowSimulation(), new FuelFlowSimulation() };
 
         long millisecondsBetweenSimulations;
 
@@ -59,9 +65,9 @@ namespace MuMech
             TryStartSimulation();
         }
 
-        public void TryStartSimulation()
+        public bool TryStartSimulation()
         {
-            if ((HighLogic.LoadedSceneIsEditor || vessel.isActiveVessel) && !simulationRunning)
+            if ((HighLogic.LoadedSceneIsEditor || (vessel != null && vessel.isActiveVessel)) && !simulationRunning)
             {
                 //We should be running simulations periodically, but one is not running right now.
                 //Check if enough time has passed since the last one to start a new one:
@@ -75,6 +81,7 @@ namespace MuMech
                         stopwatch.Reset();
 
                         StartSimulation();
+                        return true;
                     }
                     else
                     {
@@ -82,6 +89,7 @@ namespace MuMech
                     }
                 }
             }
+            return false;
         }
 
         protected void StartSimulation()
@@ -93,7 +101,9 @@ namespace MuMech
 
                 //Create two FuelFlowSimulations, one for vacuum and one for atmosphere
                 List<Part> parts = (HighLogic.LoadedSceneIsEditor ? EditorLogic.fetch.ship.parts : vessel.parts);
-                FuelFlowSimulation[] sims = { new FuelFlowSimulation(parts, dVLinearThrust), new FuelFlowSimulation(parts, dVLinearThrust) };
+                
+                sims[0].Init(parts, dVLinearThrust);
+                sims[1].Init(parts, dVLinearThrust);
 
                 //Run the simulation in a separate thread
                 ThreadPool.QueueUserWorkItem(RunSimulation, sims);
@@ -120,13 +130,12 @@ namespace MuMech
             {
                 CelestialBody simBody = HighLogic.LoadedSceneIsEditor ? editorBody : vessel.mainBody;
 
-                double staticPressure = (HighLogic.LoadedSceneIsEditor || !liveSLT ? (simBody.atmosphere ? simBody.GetPressure(0) : 0) : vessel.staticPressurekPa) * PhysicsGlobals.KpaToAtmospheres;
+                double staticPressureKpa = (HighLogic.LoadedSceneIsEditor || !liveSLT ? (simBody.atmosphere ? simBody.GetPressure(0) : 0) : vessel.staticPressurekPa);
                 double atmDensity = (HighLogic.LoadedSceneIsEditor || !liveSLT ? simBody.GetDensity(simBody.GetPressure(0), simBody.GetTemperature(0)) : vessel.atmDensity) / 1.225;
                 double mach = HighLogic.LoadedSceneIsEditor ? 1 : vessel.mach;
 
                 //Run the simulation
-                FuelFlowSimulation[] sims = (FuelFlowSimulation[])o;
-                FuelFlowSimulation.Stats[] newAtmoStats = sims[0].SimulateAllStages(1.0f, staticPressure, atmDensity, mach);
+                FuelFlowSimulation.Stats[] newAtmoStats = sims[0].SimulateAllStages(1.0f, staticPressureKpa, atmDensity, mach);
                 FuelFlowSimulation.Stats[] newVacStats = sims[1].SimulateAllStages(1.0f, 0.0, 0.0 , mach);
                 atmoStats = newAtmoStats;
                 vacStats = newVacStats;

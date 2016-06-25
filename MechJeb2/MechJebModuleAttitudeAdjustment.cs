@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using UnityEngine;
 
 namespace MuMech
@@ -16,6 +13,7 @@ namespace MuMech
         public EditableDouble kpFactor;
         public EditableDouble kiFactor;
         public EditableDouble kdFactor;
+		public EditableDouble deadband;
 
         [Persistent(pass = (int)Pass.Global)]
         public bool showInfos = false;
@@ -32,6 +30,7 @@ namespace MuMech
             kpFactor = new EditableDouble(core.attitude.kpFactor);
             kiFactor = new EditableDouble(core.attitude.kiFactor);
             kdFactor = new EditableDouble(core.attitude.kdFactor);
+            deadband = new EditableDouble(core.attitude.deadband);
             base.OnStart(state);
         }
 
@@ -92,9 +91,22 @@ namespace MuMech
                 kpFactor = Math.Max(kpFactor, 0.01);
                 GuiUtils.SimpleTextBox("Ki = pid.Kp / (", kiFactor, " * Math.Sqrt(2) * Tf)", 50);
                 kiFactor = Math.Max(kiFactor, 0.01);
+				GuiUtils.SimpleTextBox ("Deadband = ", deadband, "", 50);
+				core.attitude.deadband = Math.Max(deadband, 0.0);
 
                 core.attitude.RCS_auto = GUILayout.Toggle(core.attitude.RCS_auto, " RCS auto mode");
 
+                //Lower value of "kWlimit" reduces maximum angular velocity
+				double kWlimit = core.attitude.kWlimit;
+				var nextkWlimit = new EditableDoubleMult(kWlimit, 0.01);
+                GuiUtils.SimpleTextBox("Maximum Relative Angular Velocity", nextkWlimit, "%");
+				nextkWlimit = (EditableDouble)GUILayout.HorizontalSlider((float)nextkWlimit, 0.0F, 1.0F);
+				const int sliderPrecision = 3;
+				if (Math.Round(Math.Abs(nextkWlimit - kWlimit), sliderPrecision) > 0)
+				{
+					core.attitude.kWlimit = Math.Round(nextkWlimit, sliderPrecision);
+				}
+				
                 showInfos = GUILayout.Toggle(showInfos, "Show Numbers");
                 if (showInfos)
                 {
@@ -158,7 +170,7 @@ namespace MuMech
                     GUILayout.Label("|" + core.attitude.inertia.magnitude.ToString("F3") + "| " + MuUtils.PrettyPrint(core.attitude.inertia), GUILayout.ExpandWidth(false));
                     GUILayout.EndHorizontal();
                     
-                    Vector3d ratio = Vector3d.Scale(vesselState.MoI, core.attitude.torque.Invert());
+                    Vector3d ratio = Vector3d.Scale(vesselState.MoI, core.attitude.torque.InvertNoNaN());
 
                     GUILayout.BeginHorizontal();
                     GUILayout.Label("MOI / torque", GUILayout.ExpandWidth(true));
@@ -195,9 +207,13 @@ namespace MuMech
             GuiUtils.SimpleTextBox("Arrows length", arrows.arrowsLength, "", 50);
 
             arrows.seeThrough = GUILayout.Toggle(arrows.seeThrough, "Visible through object");
-            GUILayout.BeginHorizontal();
+            
 
-            arrows.comSphereActive = GUILayout.Toggle(arrows.comSphereActive, "Display the CoM. Radius of ", GUILayout.ExpandWidth(false));
+            arrows.comSphereActive = GUILayout.Toggle(arrows.comSphereActive, "Display the CoM", GUILayout.ExpandWidth(false));
+            arrows.colSphereActive = GUILayout.Toggle(arrows.colSphereActive, "Display the CoL", GUILayout.ExpandWidth(false));
+            arrows.cotSphereActive = GUILayout.Toggle(arrows.cotSphereActive, "Display the CoT", GUILayout.ExpandWidth(false));
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Radius of Sphere", GUILayout.ExpandWidth(true));
             arrows.comSphereRadius.text = GUILayout.TextField(arrows.comSphereRadius.text, GUILayout.Width(40));
             GUILayout.EndHorizontal();
             arrows.displayAtCoM = GUILayout.Toggle(arrows.displayAtCoM, "Arrows origins at the CoM");
@@ -205,12 +221,16 @@ namespace MuMech
             arrows.comSrfVelocityArrowActive = GUILayout.Toggle(arrows.comSrfVelocityArrowActive, "CoM Surface Velocity (green)");
             arrows.podObtVelocityArrowActive = GUILayout.Toggle(arrows.podObtVelocityArrowActive, "Pod Orbital Velocity (red)");
             arrows.comObtVelocityArrowActive = GUILayout.Toggle(arrows.comObtVelocityArrowActive, "CoM Orbital Velocity (orange)");
-            arrows.forwardArrowActive = GUILayout.Toggle(arrows.forwardArrowActive, "Command Pod Forward (Navy Blue)");
+            arrows.dotArrowActive = GUILayout.Toggle(arrows.dotArrowActive, "Direction of Thrust (purple pink)");
+            arrows.dotInstantArrowActive = GUILayout.Toggle(arrows.dotInstantArrowActive, "Direction of Thrust instant (pink)");
+            arrows.forwardArrowActive = GUILayout.Toggle(arrows.forwardArrowActive, "Command Pod Forward (electric blue)");
             //arrows.avgForwardArrowActive = GUILayout.Toggle(arrows.avgForwardArrowActive, "Forward Avg (blue)");
 
-            arrows.requestedAttitudeArrowActive = GUILayout.Toggle(arrows.requestedAttitudeArrowActive, "Requested Attitude (Gray)");
+            arrows.requestedAttitudeArrowActive = GUILayout.Toggle(arrows.requestedAttitudeArrowActive, "Requested Attitude (gray)");
 
-            arrows.debugArrowActive = GUILayout.Toggle(arrows.debugArrowActive, "Debug (Magenta)");
+            arrows.debugArrowActive = GUILayout.Toggle(arrows.debugArrowActive, "Debug (magenta)");
+
+            arrows.debugArrow2Active = GUILayout.Toggle(arrows.debugArrow2Active, "Debug2 (light blue)");
 
 
             GUILayout.EndVertical();

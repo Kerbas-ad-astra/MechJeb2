@@ -1,6 +1,3 @@
-using System;
-using UnityEngine;
-
 namespace MuMech
 {
     namespace Landing
@@ -32,7 +29,8 @@ namespace MuMech
                 if (currentError < 150)
                 {
                     core.thrust.targetThrottle = 0;
-                    core.rcs.enabled = core.landing.rcsAdjustment;
+                    if (core.landing.rcsAdjustment)
+                        core.rcs.enabled = true;
                     return new CoastToDeceleration(core);
                 }
 
