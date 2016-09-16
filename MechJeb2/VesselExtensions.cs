@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using UniLinq;
+using Smooth.Slinq;
 using UnityEngine;
 
 namespace MuMech
@@ -33,35 +33,44 @@ namespace MuMech
             else parts = vessel.Parts;
 
             List<T> list = new List<T>();
-            foreach (Part part in parts)
+            for (int p = 0; p < parts.Count; p++)
             {
-                foreach (T module in part.Modules.OfType<T>())
+                Part part = parts[p];
+
+                int count = part.Modules.Count;
+
+                for (int m = 0; m < count; m++)
                 {
-                    list.Add(module);
+                    T mod = part.Modules[m] as T;
+                    
+                    if (mod != null)
+                        list.Add(mod);
                 }
             }
             return list;
         }
 
         private static float lastFixedTime = 0;
-        private static Dictionary<Guid, MechJebCore> masterMechjebs = new Dictionary<Guid, MechJebCore>();
+        private static readonly Dictionary<Guid, MechJebCore> masterMechJeb = new Dictionary<Guid, MechJebCore>();
 
         public static MechJebCore GetMasterMechJeb(this Vessel vessel)
         {
             if (lastFixedTime != Time.fixedTime)
             {
-                masterMechjebs.Clear();
+                masterMechJeb.Clear();
                 lastFixedTime = Time.fixedTime;
             }
             Guid vesselKey = vessel == null ? Guid.Empty : vessel.id;
-            if (!masterMechjebs.ContainsKey(vesselKey))
+            
+            MechJebCore mj;
+            if (!masterMechJeb.TryGetValue(vesselKey, out mj))
             {
-                MechJebCore mj = vessel.GetModules<MechJebCore>().FirstOrDefault(p => p.running);
+                mj = vessel.GetModules<MechJebCore>().Slinq().FirstOrDefault(p => p.running);
                 if (mj != null)
-                    masterMechjebs.Add(vesselKey, mj);
+                    masterMechJeb.Add(vesselKey, mj);
                 return mj;
             }
-            return masterMechjebs[vesselKey];
+            return mj;
         }
 
         public static double TotalResourceAmount(this Vessel vessel, PartResourceDefinition definition)
@@ -96,6 +105,34 @@ namespace MuMech
         {
             PartResourceDefinition definition = PartResourceLibrary.Instance.GetDefinition(resourceName);
             return vessel.TotalResourceAmount(definition) * definition.density;
+        }
+
+        public static double MaxResourceAmount(this Vessel vessel, PartResourceDefinition definition)
+        {
+            if (definition == null) return 0;
+            List<Part> parts = (HighLogic.LoadedSceneIsEditor ? EditorLogic.fetch.ship.parts : vessel.parts);
+
+            double amount = 0;
+            for (int i = 0; i < parts.Count; i++)
+            {
+                Part p = parts[i];
+                for (int j = 0; j < p.Resources.Count; j++)
+                {
+                    PartResource r = p.Resources[j];
+
+                    if (r.info.id == definition.id)
+                    {
+                        amount += r.maxAmount;
+                    }
+                }
+            }
+
+            return amount;
+        }
+
+        public static double MaxResourceAmount(this Vessel vessel, string resourceName)
+        {
+            return vessel.MaxResourceAmount(PartResourceLibrary.Instance.GetDefinition(resourceName));
         }
 
         public static bool HasElectricCharge(this Vessel vessel)
@@ -161,8 +198,10 @@ namespace MuMech
 
             //See if any maneuver nodes occur during this patch. If there is one
             //return the patch that follows it
-            var nodes = vessel.patchedConicSolver.maneuverNodes.Where(n => (n.patch == patch && n != ignoreNode));
-            if (nodes.Any()) return nodes.First().nextPatch;
+            var nodes = vessel.patchedConicSolver.maneuverNodes.Slinq().Where((n,p) => n.patch == p && n != ignoreNode, patch);
+            // Slinq is nice but you can only enumerate it once
+            var first = nodes.FirstOrDefault();
+            if (first != null) return first.nextPatch;
 
             //return the next patch, or null if there isn't one:
             if (!finalPatch) return patch.nextPatch;
@@ -207,7 +246,7 @@ namespace MuMech
 
             while (vessel.patchedConicSolver.maneuverNodes.Count > 0)
             {
-                vessel.patchedConicSolver.RemoveManeuverNode(vessel.patchedConicSolver.maneuverNodes.Last());
+                vessel.patchedConicSolver.maneuverNodes.Last().RemoveSelf();
             }
         }
 
@@ -225,7 +264,7 @@ namespace MuMech
             for (int i = 0; i < vessel.parts.Count; i++)
             {
                 Part p = vessel.parts[i];
-                Vector3Pair partBox = p.GetBoundingBox();
+                PartExtensions.Vector3Pair partBox = p.GetBoundingBox();
 
                 if (debug)
                 {

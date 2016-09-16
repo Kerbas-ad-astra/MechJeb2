@@ -21,19 +21,10 @@ else
 	endif
 endif
 
-MECHJEBFILES := $(wildcard MechJeb2/*.cs) \
-	$(wildcard MechJeb2/Maneuver/*.cs) \
-	$(wildcard MechJeb2/Properties/*.cs) \
-	$(wildcard MechJeb2/alglib/*.cs) \
-	$(wildcard MechJeb2/LandingAutopilot/*.cs) \
-	$(wildcard MechJeb2/KerbalEngineer/*.cs) \
-	$(wildcard MechJeb2/KerbalEngineer/Extensions/*.cs) \
-	$(wildcard MechJeb2/KerbalEngineer/Helpers/*.cs) \
-	$(wildcard MechJeb2/KerbalEngineer/VesselSimulator/*.cs) \
-	$(wildcard MechJeb2/FlyingSim/*.cs)
+MECHJEBFILES := $(shell find MechJeb2 -name "*.cs")
 
 RESGEN2 := resgen2
-GMCS    := gmcs
+GMCS    ?= gmcs
 GIT     := git
 TAR     := tar
 ZIP     := zip
@@ -58,7 +49,7 @@ build/%.dll: ${MECHJEBFILES}
 	mkdir -p build
 	${RESGEN2} -usesourcepath MechJeb2/Properties/Resources.resx build/Resources.resources
 	${GMCS} -t:library -lib:"${MANAGED}" \
-		-r:Assembly-CSharp,Assembly-CSharp-firstpass,UnityEngine \
+		-r:Assembly-CSharp,Assembly-CSharp-firstpass,UnityEngine,UnityEngine.UI,KSPUtil \
 		-out:$@ \
 		${MECHJEBFILES} \
 		-resource:build/Resources.resources,MuMech.Properties.Resources.resources
@@ -66,6 +57,7 @@ build/%.dll: ${MECHJEBFILES}
 package: build ${MECHJEBFILES}
 	mkdir -p package/MechJeb2/Plugins
 	cp -r Parts package/MechJeb2/
+	cp -r Icons package/MechJeb2/
 	cp build/MechJeb2.dll package/MechJeb2/Plugins/
 	cp LICENSE.md README.md package/MechJeb2/
 
@@ -87,11 +79,13 @@ clean:
 install: build
 	mkdir -p "${KSPDIR}"/GameData/MechJeb2/Plugins
 	cp -r Parts "${KSPDIR}"/GameData/MechJeb2/
+	cp -r Icons "${KSPDIR}"/GameData/MechJeb2/
 	cp build/MechJeb2.dll "${KSPDIR}"/GameData/MechJeb2/Plugins/
 
 uninstall: info
 	rm -rf "${KSPDIR}"/GameData/MechJeb2/Plugins
 	rm -rf "${KSPDIR}"/GameData/MechJeb2/Parts
+	rm -rf "${KSPDIR}"/GameData/MechJeb2/Icons
 
 
 .PHONY : all info build package tar.gz zip clean install uninstall

@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using UnityEngine;
 
 namespace MuMech
@@ -12,17 +9,7 @@ namespace MuMech
         {
             return body.TerrainAltitude(body.GetLatitude(worldPosition), body.GetLongitude(worldPosition));
         }
-
-        public static double TerrainAltitude(this CelestialBody body, double latitude, double longitude)
-        {
-            if (body.pqsController == null) return 0;
-
-            Vector3d pqsRadialVector = QuaternionD.AngleAxis(longitude, Vector3d.down) * QuaternionD.AngleAxis(latitude, Vector3d.forward) * Vector3d.right;
-            double ret = body.pqsController.GetSurfaceHeight(pqsRadialVector) - body.pqsController.radius;
-            if (ret < 0) ret = 0;
-            return ret;
-        }
-
+        
         //The KSP drag law is dv/dt = -b * v^2 where b is proportional to the air density and
         //the ship's drag coefficient. In this equation b has units of inverse length. So 1/b
         //is a characteristic length: a ship that travels this distance through air will lose a significant
@@ -47,5 +34,29 @@ namespace MuMech
         {
             return !body.atmosphere ? 0 : body.atmosphereDepth;
         }
+
+
+        public static double AltitudeForPressure(this CelestialBody body, double pressure)
+        {
+            if (!body.atmosphere)
+                return 0;
+            double upperAlt = body.atmosphereDepth;
+            double lowerAlt = 0;
+            while (upperAlt - lowerAlt > 10)
+            {
+                double testAlt = (upperAlt + lowerAlt) * 0.5;
+                double testPressure = FlightGlobals.getStaticPressure(testAlt, body);
+                if (testPressure < pressure)
+                {
+                    upperAlt = testAlt;
+                }
+                else
+                {
+                    lowerAlt = testAlt;
+                }
+            }
+            return (upperAlt + lowerAlt) * 0.5;
+        }
+
     }
 }

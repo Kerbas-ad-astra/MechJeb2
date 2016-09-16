@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace MuMech
 {
@@ -29,6 +26,22 @@ namespace MuMech
             return null;
         }
 
+        // An allocation free version of GetModuleMass
+        public static float GetModuleMassNoAlloc(this Part p, float defaultMass, ModifierStagingSituation sit)
+        {
+            float mass = 0f;
+
+            for (int i = 0; i < p.Modules.Count; i++)
+            {
+                IPartMassModifier m = p.Modules[i] as IPartMassModifier;
+                if (m != null)
+                {
+                    mass += m.GetModuleMass(defaultMass, sit);
+                }
+            }
+            return mass;
+        }
+
         public static bool EngineHasFuel(this Part p)
         {
             for (int i = 0; i < p.Modules.Count; i++)
@@ -49,20 +62,28 @@ namespace MuMech
                 ModuleDecouple mDecouple = m as ModuleDecouple;
                 if (mDecouple != null)
                 {
-                    if (!mDecouple.isDecoupled) return true;
+                    if (!mDecouple.isDecoupled && mDecouple.stagingEnabled && p.stagingOn) return true;
                     break;
                 }
 
                 ModuleAnchoredDecoupler mAnchoredDecoupler = m as ModuleAnchoredDecoupler;
                 if (mAnchoredDecoupler != null)
                 {
-                    if (!mAnchoredDecoupler.isDecoupled) return true;
+                    if (!mAnchoredDecoupler.isDecoupled && mAnchoredDecoupler.stagingEnabled && p.stagingOn) return true;
                     break;
                 }
 
-                if (m.ClassName == "ProceduralFairingDecoupler")
+                ModuleDockingNode mDockingNode = m as ModuleDockingNode;
+                if (mDockingNode != null)
                 {
-                    return true;
+                    if (mDockingNode.staged && mDockingNode.stagingEnabled  && p.stagingOn) return true;
+                    break;
+                }
+
+                if (VesselState.isLoadedProceduralFairing && m.moduleName == "ProceduralFairingDecoupler")
+                {
+                    if (!m.Fields["decoupled"].GetValue<bool>(m) && p.stagingOn) return true;
+                    break;
                 }
             }
             return false;
@@ -99,6 +120,7 @@ namespace MuMech
             return false;
         }
 
+        // TODO add some kind of cache ? This is called a lot but reply false 99.9999% oif the time
         public static bool IsLaunchClamp(this Part p)
         {
             for (int i = 0; i < p.Modules.Count; i++)
@@ -133,6 +155,19 @@ namespace MuMech
                 }
             }
             return physicallySignificant;
+        }
+
+        public struct Vector3Pair
+        {
+            public Vector3 p1;
+
+            public Vector3 p2;
+
+            public Vector3Pair(Vector3 point1, Vector3 point2)
+            {
+                this.p1 = point1;
+                this.p2 = point2;
+            }
         }
 
         public static Vector3Pair GetBoundingBox(this Part part)
